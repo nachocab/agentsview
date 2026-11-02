@@ -91,7 +91,7 @@ func seedFrictionPG(t *testing.T, store *Store) {
 	t.Helper()
 	pg := store.DB()
 	ctx := t.Context()
-	for _, table := range []string{"friction_findings", "friction_digest_sessions", "friction_patterns", "friction_digests", "friction_issue_links"} {
+	for _, table := range []string{"friction_findings", "friction_digest_sessions", "friction_patterns", "friction_digests", "friction_issue_links", "friction_filing_state"} {
 		_, err := pg.ExecContext(ctx, "DELETE FROM "+table)
 		require.NoError(t, err, table)
 	}
@@ -190,6 +190,13 @@ func TestFrictionListParity(t *testing.T) {
 	store.DetectFrictionAvailability(ctx)
 	assert.True(t, store.FrictionIssueLinksWritable())
 	require.NoError(t, store.SaveFrictionIssueLink(ctx, link))
+	failed, next := time.Date(2026, 9, 15, 9, 0, 0, 0, time.UTC), time.Date(2026, 9, 15, 10, 0, 0, 0, time.UTC)
+	retry := db.FrictionFilingState{
+		Fingerprint: "fl1:ccc", State: db.FrictionFilingRetry, Attempts: 1,
+		FirstFailedAt: &failed, NextAttemptAt: &next, LastError: "kata: HTTP 503", UpdatedAt: failed,
+	}
+	require.NoError(t, local.SaveFrictionFilingState(ctx, retry))
+	require.NoError(t, store.SaveFrictionFilingState(ctx, retry))
 
 	patternFilters := map[string]db.FrictionPatternFilter{
 		"all":             {},
@@ -239,10 +246,30 @@ func TestFrictionListParity(t *testing.T) {
 			assert.Nil(t, rows[0].Issue, name)
 		}
 	})
+
+	t.Run("linking_clears_filing_state", func(t *testing.T) {
+		ccc := link
+		ccc.Fingerprint = "fl1:ccc"
+		for name, s := range map[string]interface {
+			db.FrictionReader
+			db.FrictionIssueLinkWriter
+		}{"sqlite": local, "postgres": store} {
+			rows, _, err := s.ListFrictionPatterns(ctx, db.FrictionPatternFilter{Fingerprints: []string{"fl1:ccc"}})
+			require.NoError(t, err, name)
+			require.Len(t, rows, 1, name)
+			assert.Equal(t, &retry, rows[0].Filing, name)
+
+			require.NoError(t, s.SaveFrictionIssueLink(ctx, ccc), name)
+			rows, _, err = s.ListFrictionPatterns(ctx, db.FrictionPatternFilter{Fingerprints: []string{"fl1:ccc"}})
+			require.NoError(t, err, name)
+			assert.Equal(t, &ccc, rows[0].Issue, name)
+			assert.Nil(t, rows[0].Filing, name)
+		}
+	})
 }
 
-// A read-only serve role cannot add friction_issue_links to a schema that
-// predates it; pattern reads must still work and show no links.
+// A read-only serve role cannot add the Kata link and filing-state tables
+// to a schema that predates them; pattern reads must still work.
 func TestFrictionPatternsReadWithoutTheLinksTable(t *testing.T) {
 	const schema = "agentsview_friction_nolinks_test"
 	pgURL := testPGURL(t)
@@ -261,8 +288,10 @@ func TestFrictionPatternsReadWithoutTheLinksTable(t *testing.T) {
 			require.NoError(t, err)
 		}
 	}
-	_, err = pg.ExecContext(ctx, "DROP TABLE friction_issue_links")
-	require.NoError(t, err)
+	for _, table := range []string{"friction_issue_links", "friction_filing_state"} {
+		_, err = pg.ExecContext(ctx, "DROP TABLE "+table)
+		require.NoError(t, err)
+	}
 	_, err = pg.ExecContext(ctx, `INSERT INTO friction_patterns (fingerprint, kind, title,
 		first_seen_date, last_seen_date, occurrence_count, session_count, last_subject_id)
 		VALUES ('fl1:aaa', 'error', 't', '2026-09-14', '2026-09-14', 2, 1, 's')`)
@@ -276,12 +305,13 @@ func TestFrictionPatternsReadWithoutTheLinksTable(t *testing.T) {
 	require.Len(t, rows, 1)
 	assert.Equal(t, "fl1:aaa", rows[0].Fingerprint)
 	assert.Nil(t, rows[0].Issue)
+	assert.Nil(t, rows[0].Filing)
 	store.DetectFrictionAvailability(ctx)
 	assert.False(t, store.FrictionIssueLinksWritable(), "filing refuses before contacting Kata")
 
-	// Once a migration adds the table, the same store reads links.
+	// Once a migration adds the tables, the same store reads links.
 	for _, statement := range strings.Split(frictionReviewDDL, ";\n") {
-		if strings.Contains(statement, "friction_issue_links") {
+		if strings.Contains(statement, "friction_issue_links") || strings.Contains(statement, "friction_filing_state") {
 			_, err = pg.ExecContext(ctx, statement)
 			require.NoError(t, err)
 		}
@@ -298,4 +328,5 @@ func TestFrictionPatternsReadWithoutTheLinksTable(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, &link, rows[0].Issue)
+	assert.Nil(t, rows[0].Filing)
 }

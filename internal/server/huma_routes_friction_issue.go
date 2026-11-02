@@ -41,6 +41,26 @@ func frictionIssueItemFrom(l *db.FrictionIssueLink) *frictionIssueItem {
 	}
 }
 
+// frictionFilingItem says why automatic filing has not linked a pattern.
+type frictionFilingItem struct {
+	State         string     `json:"state" enum:"retry,needs_person,paused" doc:"retry: waiting for the next attempt; needs_person: file or link it by hand; paused: a person removed its link"`
+	Attempts      int        `json:"attempts"`
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+	LastError     string     `json:"last_error,omitempty"`
+}
+
+func frictionFilingItemFrom(st *db.FrictionFilingState) *frictionFilingItem {
+	if st == nil {
+		return nil
+	}
+	item := &frictionFilingItem{State: st.State, Attempts: st.Attempts, LastError: st.LastError}
+	if st.NextAttemptAt != nil {
+		next := st.NextAttemptAt.UTC()
+		item.NextAttemptAt = &next
+	}
+	return item
+}
+
 type frictionPatternPathInput struct {
 	Fingerprint string `path:"fingerprint" required:"true" doc:"Pattern fingerprint (fl1:<sha256>)"`
 }
@@ -148,10 +168,17 @@ func (s *Server) frictionFiler(ctx context.Context) (*filing.Filer, error) {
 	}
 	// Refuse before Kata is contacted: an issue created here whose link
 	// cannot be saved would be left untracked.
-	if w, ok := store.(interface{ FrictionIssueLinksWritable() bool }); ok && !w.FrictionIssueLinksWritable() {
+	if !frictionLinksWritable(store) {
 		return nil, apiError(http.StatusConflict, "this database role cannot record friction issue links")
 	}
 	return &filing.Filer{Kata: s.kataConn(), Store: store, PublicURL: s.frictionPublicURL()}, nil
+}
+
+// frictionLinksWritable reports whether store can save links and filing
+// state. A PostgreSQL store knows from its startup probe; others can always.
+func frictionLinksWritable(store filing.Store) bool {
+	w, ok := store.(interface{ FrictionIssueLinksWritable() bool })
+	return !ok || w.FrictionIssueLinksWritable()
 }
 
 func frictionIssueError(err error) error {
