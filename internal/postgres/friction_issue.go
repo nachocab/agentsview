@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
 	"go.kenn.io/agentsview/internal/db"
 )
@@ -83,6 +84,35 @@ func (s *frictionIssueScan) link(fingerprint string) *db.FrictionIssueLink {
 		QualifiedID: s.qualified.String, WebURL: s.url.String,
 		Source: s.source.String, LinkedAt: s.linkedAt.Time.UTC(),
 	}
+}
+
+// FrictionIssueLinksWritable reports whether startup proved this role can
+// write Kata issue links. The filing routes refuse before contacting Kata
+// when it cannot, so no issue is created without its link.
+func (s *Store) FrictionIssueLinksWritable() bool {
+	return s.runtimeState().frictionIssueLinksWritable.Load()
+}
+
+// probeFrictionIssueLinkWrite writes a link inside a rolled-back
+// transaction. A missing table or a read-only role reports false.
+func (s *Store) probeFrictionIssueLinkWrite(ctx context.Context) bool {
+	if !pgHasTable(ctx, s.pg, "friction_issue_links") {
+		return false
+	}
+	tx, err := s.beginTx(ctx, nil)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO friction_issue_links (fingerprint, kata_instance_uid,
+			kata_project_uid, issue_uid, qualified_id, web_url, source, linked_at)
+		VALUES ('friction-capability-probe', '', '', '', '', '', 'manual', NOW())
+		ON CONFLICT (fingerprint) DO NOTHING`)
+	if err != nil && !IsReadOnlyError(err) {
+		log.Printf("friction: issue link capability probe: %v", err)
+	}
+	return err == nil
 }
 
 var _ db.FrictionIssueLinkWriter = (*Store)(nil)

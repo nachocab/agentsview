@@ -27858,11 +27858,11 @@ func (f FrictionIssueItem) Validate() error {
 }
 
 type FrictionIssuePreview struct {
-	Body     string              `json:"body" validate:"required"`
-	Labels   []string            `json:"labels" validate:"required"`
-	Metadata map[string]struct{} `json:"metadata"`
-	Priority int64               `json:"priority"`
-	Title    string              `json:"title" validate:"required"`
+	Body     string         `json:"body" validate:"required"`
+	Labels   []string       `json:"labels" validate:"required"`
+	Metadata map[string]any `json:"metadata"`
+	Priority int64          `json:"priority"`
+	Title    string         `json:"title" validate:"required"`
 }
 
 func (f FrictionIssuePreview) Validate() error {

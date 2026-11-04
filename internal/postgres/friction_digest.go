@@ -40,6 +40,7 @@ func (s *Store) frictionSessionVersionColumn(ctx context.Context) (string, error
 // other failure is logged and also disables it, so startup never fails on
 // an optional feature (spec §20).
 func (s *Store) DetectFrictionAvailability(ctx context.Context) {
+	s.runtimeState().frictionIssueLinksWritable.Store(s.probeFrictionIssueLinkWrite(ctx))
 	for _, table := range []string{"friction_digests", "friction_digest_sessions", "friction_patterns"} {
 		if !pgHasTable(ctx, s.pg, table) {
 			s.runtimeState().frictionAvailable.Store(false)

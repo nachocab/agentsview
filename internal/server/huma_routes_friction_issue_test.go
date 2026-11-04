@@ -3,12 +3,17 @@ package server_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.kenn.io/agentsview/internal/config"
+	"go.kenn.io/agentsview/internal/db"
+	"go.kenn.io/agentsview/internal/dbtest"
 	"go.kenn.io/agentsview/internal/kata"
 	"go.kenn.io/agentsview/internal/kata/katatest"
 	"go.kenn.io/agentsview/internal/server"
@@ -142,4 +147,32 @@ func TestFrictionIssueRoutesRefuse(t *testing.T) {
 			assert.Nil(t, patternIssue(t, te, fp))
 		})
 	}
+}
+
+// linksUnwritableStore is an archive that reports, like a read-only
+// PostgreSQL role, that it cannot write Kata issue links.
+type linksUnwritableStore struct{ *db.DB }
+
+func (linksUnwritableStore) FrictionIssueLinksWritable() bool { return false }
+
+func TestFrictionFilingRefusesWhenLinksCannotBeSaved(t *testing.T) {
+	s := katatest.New(t)
+	dir := tempDirWithRetryCleanup(t)
+	cfg := config.Config{
+		Host: "127.0.0.1", DataDir: dir, DBPath: filepath.Join(dir, "test.db"), WriteTimeout: 30 * time.Second,
+	}
+	database := dbtest.OpenTestDBAt(t, cfg.DBPath)
+	const date = "2026-09-14"
+	seedFrictionDigest(t, database, date)
+	fp := frictionTestSnapshot(date).Signals[0].Fingerprint()
+	is := s.AddIssue(katatest.Issue{Title: "tracked by hand", Status: "open"})
+	srv := server.New(cfg, linksUnwritableStore{database}, nil, server.WithKataConn(kata.NewConn(kata.Config{
+		Enabled: true, Hub: true, Endpoint: s.Endpoint(), Project: katatest.DefaultProjectName,
+	})))
+	te := &testEnv{srv: srv, handler: wrapTestHandler(cfg, srv.Handler()), db: database, dataDir: dir}
+	path := "/api/v1/friction/patterns/" + fp + "/issue"
+
+	assertStatus(t, te.post(t, path, `{}`), http.StatusConflict)
+	assertStatus(t, te.put(t, path, `{"issue":"`+is.UID+`"}`), http.StatusConflict)
+	assert.Empty(t, s.Requests(), "Kata is never contacted, so no issue is created without its link")
 }

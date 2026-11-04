@@ -134,7 +134,7 @@ func (s *Server) humaUnlinkFrictionPattern(
 
 // frictionFiler checks that this caller may change Kata links here: the
 // caller is allowed to start writes, this process is the filing hub, and the
-// store keeps links.
+// store keeps links and can write them.
 func (s *Server) frictionFiler(ctx context.Context) (*filing.Filer, error) {
 	if !s.frictionRunAllowed(ctx) {
 		return nil, apiError(http.StatusForbidden, "friction filing requires auth or a localhost request")
@@ -145,6 +145,11 @@ func (s *Server) frictionFiler(ctx context.Context) (*filing.Filer, error) {
 	store, ok := s.db.(filing.Store)
 	if !ok {
 		return nil, apiError(http.StatusNotImplemented, "this backend does not store friction issue links")
+	}
+	// Refuse before Kata is contacted: an issue created here whose link
+	// cannot be saved would be left untracked.
+	if w, ok := store.(interface{ FrictionIssueLinksWritable() bool }); ok && !w.FrictionIssueLinksWritable() {
+		return nil, apiError(http.StatusConflict, "this database role cannot record friction issue links")
 	}
 	return &filing.Filer{Kata: s.kataConn(), Store: store, PublicURL: s.frictionPublicURL()}, nil
 }

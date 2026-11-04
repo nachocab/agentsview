@@ -94,7 +94,8 @@ Pattern reads show the link beside each pattern: the `ISSUE` column of
 digest's `patterns`. Stored digests are not rewritten. Links survive a full
 resync. The same actions are available over HTTP as `POST`, `PUT`, and `DELETE`
 on `/api/v1/friction/patterns/{fingerprint}/issue`; they require auth or a
-localhost request, like `friction run`.
+localhost request, like `friction run`. A PostgreSQL hub whose database role
+cannot write links refuses them before contacting Kata.
 
 ## Limits
 

@@ -187,6 +187,8 @@ func TestFrictionListParity(t *testing.T) {
 		Source: db.FrictionIssueSourceCreated, LinkedAt: time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC),
 	}
 	require.NoError(t, local.SaveFrictionIssueLink(ctx, link))
+	store.DetectFrictionAvailability(ctx)
+	assert.True(t, store.FrictionIssueLinksWritable())
 	require.NoError(t, store.SaveFrictionIssueLink(ctx, link))
 
 	patternFilters := map[string]db.FrictionPatternFilter{
@@ -267,13 +269,15 @@ func TestFrictionPatternsReadWithoutTheLinksTable(t *testing.T) {
 	require.NoError(t, err)
 	// A direct store, as friction patterns --pg opens one, runs no startup
 	// probe.
-	store := &Store{pg: pg}
+	store := &Store{pg: pg, ownedDB: pg}
 
 	rows, _, err := store.ListFrictionPatterns(ctx, db.FrictionPatternFilter{})
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "fl1:aaa", rows[0].Fingerprint)
 	assert.Nil(t, rows[0].Issue)
+	store.DetectFrictionAvailability(ctx)
+	assert.False(t, store.FrictionIssueLinksWritable(), "filing refuses before contacting Kata")
 
 	// Once a migration adds the table, the same store reads links.
 	for _, statement := range strings.Split(frictionReviewDDL, ";\n") {
@@ -287,6 +291,8 @@ func TestFrictionPatternsReadWithoutTheLinksTable(t *testing.T) {
 		QualifiedID: "agentsview#f001", Source: db.FrictionIssueSourceManual,
 		LinkedAt: time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC),
 	}
+	store.DetectFrictionAvailability(ctx)
+	assert.True(t, store.FrictionIssueLinksWritable())
 	require.NoError(t, store.SaveFrictionIssueLink(ctx, link))
 	rows, _, err = store.ListFrictionPatterns(ctx, db.FrictionPatternFilter{})
 	require.NoError(t, err)

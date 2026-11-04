@@ -86,7 +86,6 @@ func priority(k friction.Kind) int {
 func issueBody(sig friction.Signal, ic issueContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Found by the AgentsView Friction Log on %s.\n\n", ic.Date)
-	fmt.Fprintf(&b, "- Kind: %s\n", sig.Kind)
 	if sig.SubjectKind == friction.SubjectDiagnostic {
 		fmt.Fprintf(&b, "- Source: %s\n", oneLine(sig.SubjectID))
 	} else {

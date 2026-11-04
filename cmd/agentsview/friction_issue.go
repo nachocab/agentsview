@@ -52,8 +52,7 @@ func newFrictionFileCommand() *cobra.Command {
 		Short: "File a friction pattern to Kata, or link the issue Kata already holds",
 		Long: "Files the pattern to the configured Kata project and records the link.\n" +
 			"A pattern that is already linked, or that Kata already tracks, is not\n" +
-			"filed again. Only the AgentsView hub files. --dry-run prints the issue\n" +
-			"without contacting Kata.",
+			"filed again. Only the AgentsView hub files.",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -267,6 +266,9 @@ func frictionIssueHTTPResult(op string, resp *http.Response, body []byte, err er
 			msg = apiErr.Error
 		}
 		return fmt.Errorf("%s: HTTP %d: %s", op, resp.StatusCode, msg)
+	}
+	if err != nil {
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
